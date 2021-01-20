@@ -8,41 +8,61 @@ import (
 	"github.com/beevik/etree"
 )
 
-// C14N11Transformer is a XML canonicalizer that follows https://www.w3.org/TR/xml-c14n11/ processing model.
+// C14NTransformer is a XML canonicalizer that follows https://www.w3.org/TR/2001/REC-xml-c14n-20010315 processing model.
 // It's still not support some type of XML which are
-// 1. XML that contains nodes with "xml:base" attribute
-// 2. XML that contains <!ENTITY ...>
-// 3. XML that contains <!ATTLIST ...>
-// 4. XML that contains Processing Instruction nodes
-type C14N11Transformer struct{}
-
-func (transformer *C14N11Transformer) Transform(ctx context.Context, nodeSet *etree.Element) ([]byte, error) {
-	resultNodeSet := nodeSet.Copy()
-	propagateParentNamespacesTo(resultNodeSet)
-	traverseAndTransformElement(
-		resultNodeSet,
-		new(superfluosNamespaceRemovingTransformer),
-		new(lexicographicalSortingTransformer),
-		new(commentRemovingTransformer),
-	)
-	return canonicalizeElementContentsAndConvertToBytes(resultNodeSet)
+// 1. XML that contains <!ENTITY ...>
+// 2. XML that contains <!ATTLIST ...>
+// 3. XML that contains Processing Instruction nodes
+// 4. XML that contains empty default namespace (xmlns="")
+type C14NTransformer struct {
 }
 
-func propagateParentNamespacesTo(element *etree.Element) {
-	allAncestorNamespaces := collectNamespacesFromAllAncestorsOf(element)
-	for namespaceFullKey, namespace := range allAncestorNamespaces {
-		if element.SelectAttr(namespaceFullKey) != nil {
+func (transformer *C14NTransformer) Transform(ctx context.Context, nodeSet *etree.Element) (*etree.Element, error) {
+	resultNodeSet := nodeSet.Copy()
+	directAncestorNamespaces := collectAncestorNamespaces(nodeSet)
+	propagateAncestorNamespacesTo(resultNodeSet, directAncestorNamespaces)
+	traverseAndTransformElement(resultNodeSet, map[string]string{})
+	return resultNodeSet, nil
+}
+
+func traverseAndTransformElement(element *etree.Element, directAncestorNamespaces map[string]string) {
+	copyOfDirectAncestorNamespaces := make(map[string]string)
+	for namespaceFullKey, namespaceURI := range directAncestorNamespaces {
+		copyOfDirectAncestorNamespaces[namespaceFullKey] = namespaceURI
+	}
+
+	for _, attr := range element.Attr {
+		if !isNamespace(attr) {
 			continue
 		}
-		element.Attr = append(element.Attr, namespace)
+		declaredNamespaceURI, isRedeclaredNamespace := directAncestorNamespaces[attr.FullKey()]
+		if !isRedeclaredNamespace || (isRedeclaredNamespace && attr.Value != declaredNamespaceURI) {
+			copyOfDirectAncestorNamespaces[attr.FullKey()] = attr.Value
+			continue
+		}
+		element.RemoveAttr(attr.FullKey())
+	}
+
+	sort.Sort(attributesByLexicographicalOrder(element.Attr))
+
+	for _, child := range element.Child {
+		if childElement, isElementNode := child.(*etree.Element); isElementNode {
+			traverseAndTransformElement(childElement, copyOfDirectAncestorNamespaces)
+		}
+		if _, isCommentNode := child.(*etree.Comment); isCommentNode {
+			element.RemoveChild(child)
+		}
 	}
 }
 
-func collectNamespacesFromAllAncestorsOf(element *etree.Element) map[string]etree.Attr {
+func collectAncestorNamespaces(element *etree.Element) map[string]etree.Attr {
 	result := make(map[string]etree.Attr)
 	for parent := element.Parent(); parent != nil; parent = parent.Parent() {
 		for _, attr := range parent.Attr {
-			if attr.Space != "xmlns" && attr.FullKey() != "xmlns" {
+			if !isNamespace(attr) {
+				continue
+			}
+			if _, isAlreadyCollected := result[attr.FullKey()]; isAlreadyCollected {
 				continue
 			}
 			result[attr.FullKey()] = attr
@@ -51,34 +71,13 @@ func collectNamespacesFromAllAncestorsOf(element *etree.Element) map[string]etre
 	return result
 }
 
-func getOnlyNamespaceAttrFrom(element *etree.Element) map[string]etree.Attr {
-	result := make(map[string]etree.Attr)
-	for _, attr := range element.Attr {
-		if attr.Space != "xmlns" && attr.FullKey() != "xmlns" {
+func propagateAncestorNamespacesTo(element *etree.Element, ancestorNamespaces map[string]etree.Attr) {
+	for namespaceFullKey, namespaceAttr := range ancestorNamespaces {
+		if redeclaredNamespace := element.SelectAttr(namespaceFullKey); redeclaredNamespace != nil {
 			continue
 		}
-		result[attr.FullKey()] = attr
+		element.Attr = append(element.Attr, namespaceAttr)
 	}
-	return result
-}
-
-func traverseAndTransformElement(element *etree.Element, transformers ...elementTransformer) {
-	for _, transformer := range transformers {
-		transformer.Transform(element)
-	}
-	for _, childElement := range element.ChildElements() {
-		traverseAndTransformElement(childElement, transformers...)
-	}
-}
-
-type elementTransformer interface {
-	Transform(element *etree.Element)
-}
-
-type lexicographicalSortingTransformer struct{}
-
-func (transformer *lexicographicalSortingTransformer) Transform(element *etree.Element) {
-	sort.Sort(attributesByLexicographicalOrder(element.Attr))
 }
 
 type attributesByLexicographicalOrder []etree.Attr
@@ -125,32 +124,14 @@ func isUnqualifiedAttribute(attribute etree.Attr) bool {
 	return !isNamespace(attribute) && attribute.Space == ""
 }
 
-type superfluosNamespaceRemovingTransformer struct{}
-
-func (transformer *superfluosNamespaceRemovingTransformer) Transform(element *etree.Element) {
-	parent := element.Parent()
-	if parent == nil {
-		return
-	}
-	namespacesOfParent := getOnlyNamespaceAttrFrom(parent)
-	for _, attr := range element.Attr {
-		if namespaceAttr, isRedeclared := namespacesOfParent[attr.FullKey()]; isRedeclared && namespaceAttr.Value == attr.Value {
-			element.RemoveAttr(attr.FullKey())
-		}
-	}
-}
-
-type commentRemovingTransformer struct{}
-
-func (transformer *commentRemovingTransformer) Transform(element *etree.Element) {
-	for _, token := range element.Child {
-		if _, isCommentNode := token.(*etree.Comment); isCommentNode {
-			element.RemoveChild(token)
-		}
-	}
-}
-
-func canonicalizeElementContentsAndConvertToBytes(element *etree.Element) ([]byte, error) {
+// CompleteCanonicalization performs the canonicalization that does not include in the Canonicalization Transformer.
+// If any of Canonicalization is used, this function MUST be called to ensure the correctness of canonicalization.
+//
+// The canonicalization handled by this function are:
+// 1. Canonicalize end tags from <aaa    /> to <aaa></aaa>
+// 2. Canonicalize text nodes
+// 3. Canonicalize attribute nodes
+func CompleteCanonicalization(element *etree.Element) ([]byte, error) {
 	doc := etree.NewDocument()
 	doc.SetRoot(element)
 	doc.WriteSettings = etree.WriteSettings{
