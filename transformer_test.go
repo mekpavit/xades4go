@@ -1,4 +1,4 @@
-package internal
+package xades4go
 
 import (
 	"context"
@@ -43,7 +43,8 @@ func TestEnvelopedSignatureTransformer_Transform(t *testing.T) {
 				t.Errorf("EnvelopedSignatureTransformer.Transform() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			got, err := CompleteCanonicalization(gotElement)
+			gotEtreeElement := gotElement.(*etree.Element)
+			got, err := CompleteCanonicalization(gotEtreeElement)
 			if err != nil {
 				t.Errorf("CompleteCanonicalization returns error: %v", err)
 			}

@@ -1,7 +1,8 @@
-package internal
+package xades4go
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 
@@ -17,7 +18,37 @@ import (
 type C14NTransformer struct {
 }
 
-func (transformer *C14NTransformer) Transform(ctx context.Context, nodeSet *etree.Element) (*etree.Element, error) {
+func (transformer *C14NTransformer) Transform(ctx context.Context, input interface{}) (interface{}, error) {
+	var inputNodeSet *etree.Element
+	switch i := input.(type) {
+	case *etree.Element:
+		inputNodeSet = i
+	case []byte:
+		var err error
+		inputNodeSet, err = createNodeSetFromBytes(i)
+		if err != nil {
+			return nil, err
+		}
+	default:
+		return nil, errors.New("input must be []byte or *etree.Element")
+	}
+	canonicaledNodeSet, err := transformer.transform(ctx, inputNodeSet)
+	if err != nil {
+		return nil, err
+	}
+	return CompleteCanonicalization(canonicaledNodeSet)
+}
+
+func createNodeSetFromBytes(xmlContent []byte) (*etree.Element, error) {
+	etreeDoc := etree.NewDocument()
+	err := etreeDoc.ReadFromBytes(xmlContent)
+	if err != nil {
+		return nil, fmt.Errorf("error while parsing XML bytes to node set: %w", err)
+	}
+	return etreeDoc.Root(), nil
+}
+
+func (transformer *C14NTransformer) transform(ctx context.Context, nodeSet *etree.Element) (*etree.Element, error) {
 	resultNodeSet := nodeSet.Copy()
 	directAncestorNamespaces := collectAncestorNamespaces(nodeSet)
 	propagateAncestorNamespacesTo(resultNodeSet, directAncestorNamespaces)

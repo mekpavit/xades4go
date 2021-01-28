@@ -1,4 +1,4 @@
-package internal
+package xades4go
 
 import (
 	"context"
@@ -171,7 +171,7 @@ Second line</text>
 				t.Errorf("C14N11Transformer.Transform() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			got, err := CompleteCanonicalization(gotElement)
+			got := gotElement.([]byte)
 			if err != nil {
 				t.Errorf("CompleteCanonicalization returns error: %v", err)
 				return
