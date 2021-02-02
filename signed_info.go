@@ -1,5 +1,7 @@
 package xades4go
 
+import "errors"
+
 const (
 	// Canonicalization Algorithm
 	CanonicalXML10Algorithm                            = "http://www.w3.org/TR/2001/RECxmlc14n20010315"
@@ -47,4 +49,13 @@ type SignedInfoFactory interface {
 	CreateTransformer(algorithm string) (Transformer, error)
 	CreateCanonicalizer(canonicalizationAlgorithm string) (Canonicalizer, error)
 	CreateDereferencer() Dereferencer
+}
+
+// Digester is an object that perform digest algorithm on octet-stream input and return base64-encoded output.
+type Digester interface {
+	Digest(input []byte) ([]byte, error)
+}
+
+func CreateDigester(algorithmName string) (Digester, error) {
+	return nil, fmt.Errorf("this package does not implement %s digest algorithm", algorithmName)
 }
