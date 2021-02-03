@@ -2,43 +2,10 @@ package etreeimpl
 
 import (
 	"errors"
-	"fmt"
 
 	"github.com/beevik/etree"
 	"github.com/mekpavit/xades4go"
 )
-
-type signedInfoFactory struct{}
-
-func (factory *signedInfoFactory) CreateTransformer(algorithmName string) (xades4go.Transformer, error) {
-	if algorithmName == "" {
-		return nil, errors.New("Algorithm must not be empty")
-	}
-	switch algorithmName {
-	case "http://www.w3.org/TR/2001/RECxmlc14n20010315":
-		return &canonicalXML10Canonicalizer{}, nil
-	case "http://www.w3.org/TR/2001/RECxmlc14n20010315#WithComments":
-		return nil, fmt.Errorf("%s was not implemented by this package", algorithmName)
-	case "http://www.w3.org/2006/12/xmlc14n11":
-		return nil, fmt.Errorf("%s was not implemented by this package", algorithmName)
-	case "http://www.w3.org/2006/12/xmlc14n11#WithComments":
-		return nil, fmt.Errorf("%s was not implemented by this package", algorithmName)
-	case "http://www.w3.org/2001/10/xmlexcc14n#":
-		return nil, fmt.Errorf("%s was not implemented by this package", algorithmName)
-	case "http://www.w3.org/2001/10/xmlexcc14n#WithComments":
-		return nil, fmt.Errorf("%s was not implemented by this package", algorithmName)
-
-	case "http://www.w3.org/2000/09/xmldsig#base64":
-		return nil, fmt.Errorf("%s was not implemented by this package", algorithmName)
-	case "http://www.w3.org/TR/1999/RECxpath19991116":
-		return nil, fmt.Errorf("%s was not implemented by this package", algorithmName)
-	case "http://www.w3.org/2000/09/xmldsig#envelopedsignature":
-		return &envelopedSignatureTransformer{}, nil
-	case "http://www.w3.org/TR/1999/RECxslt19991116":
-		return nil, fmt.Errorf("%s was not implemented by this package", algorithmName)
-	}
-	return nil, fmt.Errorf("%s was not an acceptable Transform algorithm", algorithmName)
-}
 
 type envelopedSignatureTransformer struct{}
 
