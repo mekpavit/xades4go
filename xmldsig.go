@@ -2,6 +2,9 @@ package xades4go
 
 import (
 	"bytes"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/base64"
 	"errors"
 	"fmt"
 
@@ -11,6 +14,13 @@ import (
 type XMLDSigValidator struct {
 	signedInfoFactory                SignedInfoFactory
 	defaultCanonicalizationAlgorithm string
+}
+
+func NewXMLDSigValidator(signedInfoFactory SignedInfoFactory) SignatureValidator {
+	return &XMLDSigValidator{
+		signedInfoFactory:                signedInfoFactory,
+		defaultCanonicalizationAlgorithm: CanonicalXML10Algorithm,
+	}
 }
 
 func (validator *XMLDSigValidator) Validate(xmlBytes []byte) (ValidationResult, error) {
@@ -40,7 +50,10 @@ func (validator *XMLDSigValidator) Validate(xmlBytes []byte) (ValidationResult, 
 		if err != nil {
 			return ValidationResult{}, fmt.Errorf("at Reference#%d element, cannot dereference the given URI: %w", referenceIndex, err)
 		}
-		transformsElement := reference.SelectElement(transformsElementTag)
+		transformsElement, err := mustFoundOnlyOneIfFound(reference, transformsElementTag)
+		if err != nil {
+			return ValidationResult{}, fmt.Errorf("at Reference#%d element: %w", referenceIndex, err)
+		}
 		if transformsElement != nil {
 			transformElements, err := mustFoundAtLeastOneChildElement(transformsElement, transformElementTag)
 			if err != nil {
@@ -103,6 +116,66 @@ func (validator *XMLDSigValidator) Validate(xmlBytes []byte) (ValidationResult, 
 		}
 		result.ReferenceValidationResults = append(result.ReferenceValidationResults, referenceValidationResult)
 	}
+	canonicalizationMethodElement, err := mustFoundOnlyOneChildElement(signedInfoElement, canonicalizationMethodElementTag)
+	if err != nil {
+		return ValidationResult{}, err
+	}
+	algorithmAttribute, err := mustFoundAttribute(canonicalizationMethodElement, algorithmAttributeKey)
+	if err != nil {
+		return ValidationResult{}, err
+	}
+	canonicalizationAlgorithm := algorithmAttribute.Value
+	signatureMethodElement, err := mustFoundOnlyOneChildElement(signedInfoElement, signatureMethodElementTag)
+	if err != nil {
+		return ValidationResult{}, err
+	}
+	algorithmAttribute, err = mustFoundAttribute(signatureMethodElement, algorithmAttributeKey)
+	if err != nil {
+		return ValidationResult{}, err
+	}
+	signedInfoInput, err := validator.signedInfoFactory.CreateDereferencer().Dereference(xmlBytes, "//"+signedInfoElementTag)
+	if err != nil {
+		return ValidationResult{}, fmt.Errorf("cannot derefernce SignedInfo element: %w", err)
+	}
+	canonicalizer, err := validator.signedInfoFactory.CreateCanonicalizer(canonicalizationAlgorithm)
+	if err != nil {
+		return ValidationResult{}, fmt.Errorf("cannot create canonicalizer from CanonicalizationMethod element: %w", err)
+	}
+	canonicalizedSignedInfo, err := canonicalizer.Canonicalize(signedInfoInput)
+	if err != nil {
+		return ValidationResult{}, fmt.Errorf("error while canonicalizing SignedInfo element: %w", err)
+	}
+	signatureMethodAlgorithm := algorithmAttribute.Value
+	keyInfoElement, err := mustFoundOnlyOneIfFound(signatureElement, keyInfoElementTag)
+	if err != nil {
+		return ValidationResult{}, err
+	}
+	signedInfoDigester, err := CreateDigesterForSignatureAlgorithm(signatureMethodAlgorithm)
+	if err != nil {
+		return ValidationResult{}, err
+	}
+	digestedSignedInfo, err := signedInfoDigester.Digest(canonicalizedSignedInfo)
+	if err != nil {
+		return ValidationResult{}, fmt.Errorf("error while digesting SignedInfo element: %w", err)
+	}
+	signatureValueElement, err := mustFoundOnlyOneChildElement(signatureElement, signatureValueElementTag)
+	if err != nil {
+		return ValidationResult{}, err
+	}
+	signatureValue := signatureValueElement.Text()
+	possibleSignatureVerifiers, err := createPossibleSignatureVerifiersFromKeyInfoElement(keyInfoElement, signatureMethodAlgorithm)
+	if err != nil {
+		return ValidationResult{}, err
+	}
+	isSignatureValid := false
+	for _, signatureVerifier := range possibleSignatureVerifiers {
+		err := signatureVerifier.Verify(signatureMethodAlgorithm, digestedSignedInfo, []byte(signatureValue))
+		if err == nil {
+			isSignatureValid = true
+			break
+		}
+	}
+	result.IsSignatureValid = isSignatureValid
 	return result, nil
 }
 
@@ -151,4 +224,43 @@ func mustFoundAttribute(element *etree.Element, attributeKey string) (etree.Attr
 		return etree.Attr{}, fmt.Errorf("attribute %s is not found on %s element", attributeKey, element.FullTag())
 	}
 	return *attribute, nil
+}
+
+func mustFoundOnlyOneIfFound(parent *etree.Element, childTag string) (*etree.Element, error) {
+	foundElements := parent.SelectElements(childTag)
+	if len(foundElements) > 1 {
+		return nil, fmt.Errorf("found more than one %s elemnt on %s element", childTag, parent.FullTag())
+	}
+	if len(foundElements) == 1 {
+		return foundElements[0], nil
+	}
+	return nil, nil
+}
+
+func createPossibleSignatureVerifiersFromKeyInfoElement(keyInfoElement *etree.Element, signatureAlgorithm string) ([]SignatureValueVerifier, error) {
+	result := make([]SignatureValueVerifier, 0)
+	x509DataElements := keyInfoElement.SelectElements(x509DataElementTag)
+	if len(x509DataElements) > 0 {
+		for _, x509Element := range x509DataElements {
+			x509CertificateElements := x509Element.SelectElements(x509CertificateElementTag)
+			if len(x509CertificateElements) > 0 {
+				for _, x509CertificateElement := range x509CertificateElements {
+
+					asn1Certificate, err := base64.StdEncoding.DecodeString(x509CertificateElement.Text())
+					if err != nil {
+						return nil, errors.New("cannot base64-decode attached certificate: " + err.Error())
+					}
+					certificate, err := x509.ParseCertificate(asn1Certificate)
+					if err != nil {
+						return nil, errors.New("cannot parse attached certificate: " + err.Error())
+					}
+					switch pub := certificate.PublicKey.(type) {
+					case *rsa.PublicKey:
+						result = append(result, &rsaSignatureValueVerifier{rsaPublicKey: pub})
+					}
+				}
+			}
+		}
+	}
+	return result, nil
 }

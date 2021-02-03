@@ -1,6 +1,10 @@
 package xades4go
 
-import "errors"
+import (
+	"crypto"
+	"fmt"
+	"errors"
+)
 
 const (
 	// Canonicalization Algorithm
@@ -16,7 +20,28 @@ const (
 	XPathFilteringAlgorithm              = "http://www.w3.org/TR/1999/REC-xpath-19991116"
 	EnvelopedSignatureTransformAlgorithm = "http://www.w3.org/2000/09/xmldsig#enveloped-signature"
 	XLSTTransformAlgorithm               = "http://www.w3.org/TR/1999/REC-xslt-19991116"
-)
+
+	// Digest Algorithm
+	SHA1MessageDigestAlgorithm   = "http://www.w3.org/2000/09/xmldsig#sha1"
+	SHA224MessageDigestAlgorithm = "http://www.w3.org/2001/04/xmldsig-more#sha224"
+	SHA256MessageDigestAlgorithm = "http://www.w3.org/2001/04/xmlenc#sha256"
+	SHA384MessageDigestAlgorithm = "http://www.w3.org/2001/04/xmldsig-more#sha384"
+	SHA512MessageDigestAlgotithm = "http://www.w3.org/2001/04/xmlenc#sha512"
+
+	// Signature Base64Algorithm
+	DSASHA1SignatureAlgorithm = "http://www.w3.org/2000/09/xmldsig#dsa-sha1"
+	DSASHA256SignatureAlgorithm = "http://www.w3.org/2009/xmldsig11#dsa-sha256"
+	RSASHA1SignatureAlgorithm = "http://www.w3.org/2000/09/xmldsig#rsa-sha1"
+	RSASHA224SignatureAlgorithm = "http://www.w3.org/2001/04/xmldsig-more#rsa-sha224"
+	RSASHA256SignatureAlgorithm = "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"
+	RSASHA384SignatureAlgorithm = "http://www.w3.org/2001/04/xmldsig-more#rsa-sha384"
+	RSASHA512SignatureAlgorithm = "http://www.w3.org/2001/04/xmldsig-more#rsa-sha512"
+	ECDSASHA1SignatureAlgorithm = "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha1"
+	ECDSASHA224SignatureAlgorithm = "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha224"
+	ECDSASHA256SignatureAlgorithm = "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha256"
+	ECDSASHA384SignatureAlgorithm = "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha384"
+	ECDSASHA512SignatureAlgorithm = "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha512"
+	)
 
 // Transformer is an interface that perform Transform algorithm which follows https://www.w3.org/TR/xmldsig-core1/#sec-TransformAlg.
 // interface{} is used as an input and output intentionally to provide freedom to implement Transformer with any 3rd-package. But for convenice, []byte will be used as a octa-stream in XMLDSig document.
@@ -56,6 +81,73 @@ type Digester interface {
 	Digest(input []byte) ([]byte, error)
 }
 
+type cryptoDigester struct {
+	h crypto.Hash
+}
+
+func (digester *cryptoDigester) Digest(input []byte) ([]byte, error) {
+	hash := digester.h.New()
+	_, err := hash.Write(input)
+	if err != nil {
+		return nil, fmt.Errorf("cannot digest using %s: %w", digester.h.String(), err)
+	}
+	return hash.Sum(nil), nil
+}
+
 func CreateDigester(algorithmName string) (Digester, error) {
+	if algorithmName == "" {
+		return nil, errors.New("Algorithm must not be empty")
+	}
+	switch algorithmName {
+	case SHA1MessageDigestAlgorithm:
+		return &cryptoDigester{h: crypto.SHA1}, nil
+	case SHA224MessageDigestAlgorithm:
+		return &cryptoDigester{h: crypto.SHA224}, nil
+	case SHA256MessageDigestAlgorithm:
+		return &cryptoDigester{h: crypto.SHA256}, nil
+	case SHA384MessageDigestAlgorithm:
+		return &cryptoDigester{h: crypto.SHA384}, nil
+	case SHA512MessageDigestAlgotithm:
+		return &cryptoDigester{h: crypto.SHA512}, nil
+	}
 	return nil, fmt.Errorf("this package does not implement %s digest algorithm", algorithmName)
+}
+
+func CreateDigesterForSignatureAlgorithm(signatureAlgorithm string) (Digester, error) {
+	h, err := mapSignatureAlgorithmToCrytoHash(signatureAlgorithm)
+	if err != nil {
+		return nil, err
+	}
+	return &cryptoDigester{h: h}, nil
+}
+
+func mapSignatureAlgorithmToCrytoHash(signatureAlgorithm string) (crypto.Hash, error) {
+	if signatureAlgorithm == "" {
+		return 0, errors.New("Algorithm must not be empty")
+	}
+	switch signatureAlgorithm {
+	case DSASHA1SignatureAlgorithm:
+		return crypto.SHA1, nil
+	case DSASHA256SignatureAlgorithm:
+		return crypto.SHA256, nil
+	case ECDSASHA1SignatureAlgorithm:
+		return crypto.SHA1, nil
+	case RSASHA224SignatureAlgorithm:
+		return crypto.SHA224, nil
+	case RSASHA256SignatureAlgorithm:
+		return crypto.SHA256, nil
+	case RSASHA384SignatureAlgorithm:
+		return crypto.SHA384, nil
+	case RSASHA512SignatureAlgorithm:
+		return crypto.SHA512, nil
+	case ECDSASHA224SignatureAlgorithm:
+		return crypto.SHA224, nil
+	case ECDSASHA256SignatureAlgorithm:
+		return crypto.SHA256, nil
+	case ECDSASHA384SignatureAlgorithm:
+		return crypto.SHA384, nil
+	case ECDSASHA512SignatureAlgorithm:
+		return crypto.SHA512, nil
+	}
+	return 0, fmt.Errorf("this package does not implement %s signature algorithm", signatureAlgorithm)
 }
