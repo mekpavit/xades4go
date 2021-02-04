@@ -2,18 +2,19 @@ package xades4go
 
 import (
 	"crypto"
-	"fmt"
+	"encoding/base64"
 	"errors"
+	"fmt"
 )
 
 const (
 	// Canonicalization Algorithm
-	CanonicalXML10Algorithm                            = "http://www.w3.org/TR/2001/RECxmlc14n20010315"
-	CanonicalXML10WithCommentAlgorithm                 = "http://www.w3.org/TR/2001/RECxmlc14n20010315#WithComments"
-	CanonicalXML11Algorithm                            = "http://www.w3.org/2006/12/xmlc14n11"
-	CanonicalXML11WithCommentAlgorithm                 = "http://www.w3.org/2006/12/xmlc14n11#WithComments"
-	ExclusiveXMLCanonicalization10Algorithm            = "http://www.w3.org/2001/10/xmlexcc14n#"
-	ExclusiveXMLCanonicalization10WithCommentAlgorithm = "http://www.w3.org/2001/10/xmlexcc14n#WithComments"
+	CanonicalXML10Algorithm                            = "http://www.w3.org/TR/2001/REC-xml-c14n-20010315"
+	CanonicalXML10WithCommentAlgorithm                 = "http://www.w3.org/TR/2001/REC-xml-c14n-20010315#WithComments"
+	CanonicalXML11Algorithm                            = "http://www.w3.org/2006/12/xml-c14n11"
+	CanonicalXML11WithCommentAlgorithm                 = "http://www.w3.org/2006/12/xml-c14n11#WithComments"
+	ExclusiveXMLCanonicalization10Algorithm            = "http://www.w3.org/2001/10/xml-exc-c14n#"
+	ExclusiveXMLCanonicalization10WithCommentAlgorithm = "http://www.w3.org/2001/10/xml-exc-c14n#WithComments"
 
 	// Transform Algorithm
 	Base64Algorithm                      = "http://www.w3.org/2000/09/xmldsig#base64"
@@ -29,19 +30,19 @@ const (
 	SHA512MessageDigestAlgotithm = "http://www.w3.org/2001/04/xmlenc#sha512"
 
 	// Signature Base64Algorithm
-	DSASHA1SignatureAlgorithm = "http://www.w3.org/2000/09/xmldsig#dsa-sha1"
-	DSASHA256SignatureAlgorithm = "http://www.w3.org/2009/xmldsig11#dsa-sha256"
-	RSASHA1SignatureAlgorithm = "http://www.w3.org/2000/09/xmldsig#rsa-sha1"
-	RSASHA224SignatureAlgorithm = "http://www.w3.org/2001/04/xmldsig-more#rsa-sha224"
-	RSASHA256SignatureAlgorithm = "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"
-	RSASHA384SignatureAlgorithm = "http://www.w3.org/2001/04/xmldsig-more#rsa-sha384"
-	RSASHA512SignatureAlgorithm = "http://www.w3.org/2001/04/xmldsig-more#rsa-sha512"
-	ECDSASHA1SignatureAlgorithm = "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha1"
+	DSASHA1SignatureAlgorithm     = "http://www.w3.org/2000/09/xmldsig#dsa-sha1"
+	DSASHA256SignatureAlgorithm   = "http://www.w3.org/2009/xmldsig11#dsa-sha256"
+	RSASHA1SignatureAlgorithm     = "http://www.w3.org/2000/09/xmldsig#rsa-sha1"
+	RSASHA224SignatureAlgorithm   = "http://www.w3.org/2001/04/xmldsig-more#rsa-sha224"
+	RSASHA256SignatureAlgorithm   = "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"
+	RSASHA384SignatureAlgorithm   = "http://www.w3.org/2001/04/xmldsig-more#rsa-sha384"
+	RSASHA512SignatureAlgorithm   = "http://www.w3.org/2001/04/xmldsig-more#rsa-sha512"
+	ECDSASHA1SignatureAlgorithm   = "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha1"
 	ECDSASHA224SignatureAlgorithm = "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha224"
 	ECDSASHA256SignatureAlgorithm = "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha256"
 	ECDSASHA384SignatureAlgorithm = "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha384"
 	ECDSASHA512SignatureAlgorithm = "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha512"
-	)
+)
 
 // Transformer is an interface that perform Transform algorithm which follows https://www.w3.org/TR/xmldsig-core1/#sec-TransformAlg.
 // interface{} is used as an input and output intentionally to provide freedom to implement Transformer with any 3rd-package. But for convenice, []byte will be used as a octa-stream in XMLDSig document.
@@ -56,7 +57,8 @@ type Canonicalizer interface {
 
 // Dereferencer is a object that dereference data object from URI (URI attribute of a given Reference element) and XML bytes to XML type.
 type Dereferencer interface {
-	Dereference(xmlContent []byte, uri string) (XML, error)
+	DereferenceByURI(xmlContent []byte, uri string) (XML, error)
+	DereferenceByPath(xmlContent []byte, path string) (XML, error)
 }
 
 // XML is an input/output of/from Transformer, Canonicalizer and Dereferencer.
@@ -91,7 +93,7 @@ func (digester *cryptoDigester) Digest(input []byte) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("cannot digest using %s: %w", digester.h.String(), err)
 	}
-	return hash.Sum(nil), nil
+	return []byte(base64.StdEncoding.EncodeToString(hash.Sum(nil))), nil
 }
 
 func CreateDigester(algorithmName string) (Digester, error) {

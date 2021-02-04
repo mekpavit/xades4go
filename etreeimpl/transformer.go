@@ -32,15 +32,14 @@ func (transformer *envelopedSignatureTransformer) Transform(input xades4go.XML) 
 }
 
 func (transformer *envelopedSignatureTransformer) transform(nodeSet *etree.Element) (*etree.Element, error) {
-	resultNodeSet := nodeSet.Copy()
-	signatureElement := resultNodeSet.FindElement("//Signature")
+	signatureElement := nodeSet.FindElement("//Signature")
 	if signatureElement == nil {
-		return resultNodeSet, nil
+		return nodeSet, nil
 	}
 	parentOfSignatureElement := signatureElement.Parent()
 	if parentOfSignatureElement == nil {
-		return resultNodeSet, nil
+		return nodeSet, nil
 	}
 	parentOfSignatureElement.RemoveChild(signatureElement)
-	return resultNodeSet, nil
+	return nodeSet, nil
 }

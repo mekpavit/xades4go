@@ -1,12 +1,16 @@
 package xades4go
 
-import "crypto/rsa"
+import (
+	"crypto/rsa"
+	"encoding/base64"
+	"fmt"
+)
 
 const (
 	signatureElementTag              = "Signature"
 	signedInfoElementTag             = "SignedInfo"
 	referenceElementTag              = "Reference"
-	transformsElementTag             = "Transformers"
+	transformsElementTag             = "Transforms"
 	transformElementTag              = "Transform"
 	digestMethodElementTag           = "DigestMethod"
 	digestValueElementTag            = "DigestValue"
@@ -33,22 +37,32 @@ type ValidationResult struct {
 
 type ReferenceValidationResult struct {
 	IsValid              bool
-	GeneratedDigestValue []byte
-	DigestValue          []byte
+	GeneratedDigestValue string
+	DigestValue          string
 }
 
+// SignatureValueVerifier is an object that verify Base64-encoded signature value (in SignatureValue element) against canonicalized SignedInfo element using the given signature algorithm.
 type SignatureValueVerifier interface {
-	Verify(signatureAlgorithm string, hashed []byte, signatureValue []byte) error
+	Verify(signatureAlgorithm string, canonicalizedSignedInfo []byte, base64SignatureValue []byte) error
 }
 
 type rsaSignatureValueVerifier struct {
 	rsaPublicKey *rsa.PublicKey
 }
 
-func (verifier *rsaSignatureValueVerifier) Verify(signatureAlgorithm string, hashed []byte, signatureValue []byte) error {
+func (verifier *rsaSignatureValueVerifier) Verify(signatureAlgorithm string, canonicalizedSignedInfo []byte, base64SignatureValue []byte) error {
 	hashAlgorithm, err := mapSignatureAlgorithmToCrytoHash(signatureAlgorithm)
 	if err != nil {
 		return err
 	}
-	return rsa.VerifyPKCS1v15(verifier.rsaPublicKey, hashAlgorithm, hashed, signatureValue)
+	h := hashAlgorithm.New()
+	_, err = h.Write(canonicalizedSignedInfo)
+	if err != nil {
+		return fmt.Errorf("cannot hash SignedInfo using %s: %w", hashAlgorithm.String(), err)
+	}
+	signatureValue, err := base64.StdEncoding.DecodeString(string(base64SignatureValue))
+	if err != nil {
+		return fmt.Errorf("SignatureValue is not base64-encoded: %w", err)
+	}
+	return rsa.VerifyPKCS1v15(verifier.rsaPublicKey, hashAlgorithm, h.Sum(nil), []byte(signatureValue))
 }

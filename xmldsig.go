@@ -11,19 +11,19 @@ import (
 	"github.com/beevik/etree"
 )
 
-type XMLDSigValidator struct {
+type XMLDSigSignatureValidator struct {
 	signedInfoFactory                SignedInfoFactory
 	defaultCanonicalizationAlgorithm string
 }
 
-func NewXMLDSigValidator(signedInfoFactory SignedInfoFactory) SignatureValidator {
-	return &XMLDSigValidator{
+func NewXMLDSigSignatureValidator(signedInfoFactory SignedInfoFactory) SignatureValidator {
+	return &XMLDSigSignatureValidator{
 		signedInfoFactory:                signedInfoFactory,
 		defaultCanonicalizationAlgorithm: CanonicalXML10Algorithm,
 	}
 }
 
-func (validator *XMLDSigValidator) Validate(xmlBytes []byte) (ValidationResult, error) {
+func (validator *XMLDSigSignatureValidator) Validate(xmlBytes []byte) (ValidationResult, error) {
 	rootElement, err := createEtreeElementFromXMLBytes(xmlBytes)
 	if err != nil {
 		return ValidationResult{}, err
@@ -46,7 +46,7 @@ func (validator *XMLDSigValidator) Validate(xmlBytes []byte) (ValidationResult, 
 		if err != nil {
 			return ValidationResult{}, errors.New("this validator does not support anonymous referecing (no URI attribute)")
 		}
-		xmlInput, err := validator.signedInfoFactory.CreateDereferencer().Dereference(xmlBytes, uriAttribute.Value)
+		xmlInput, err := validator.signedInfoFactory.CreateDereferencer().DereferenceByURI(xmlBytes, uriAttribute.Value)
 		if err != nil {
 			return ValidationResult{}, fmt.Errorf("at Reference#%d element, cannot dereference the given URI: %w", referenceIndex, err)
 		}
@@ -85,7 +85,7 @@ func (validator *XMLDSigValidator) Validate(xmlBytes []byte) (ValidationResult, 
 				return ValidationResult{}, fmt.Errorf("error while canonicalizing at Reference#%d: %w", referenceIndex, err)
 			}
 		}
-		digestMethodElement, err := mustFoundOnlyOneElement(reference, digestMethodElementTag)
+		digestMethodElement, err := mustFoundOnlyOneChildElement(reference, digestMethodElementTag)
 		if err != nil {
 			return ValidationResult{}, fmt.Errorf("at Reference#%d element: %w", referenceIndex, err)
 		}
@@ -101,15 +101,15 @@ func (validator *XMLDSigValidator) Validate(xmlBytes []byte) (ValidationResult, 
 		if err != nil {
 			return ValidationResult{}, fmt.Errorf("error while digesting at Reference#%d: %w", referenceIndex, err)
 		}
-		digestValueElement, err := mustFoundOnlyOneElement(reference, digestValueElementTag)
+		digestValueElement, err := mustFoundOnlyOneChildElement(reference, digestValueElementTag)
 		if err != nil {
 			return ValidationResult{}, fmt.Errorf("at Reference#%d element: %w", referenceIndex, err)
 		}
 		digestValue := []byte(digestValueElement.Text())
 		referenceValidationResult := ReferenceValidationResult{
 			IsValid:              false,
-			GeneratedDigestValue: generatedDigestValue,
-			DigestValue:          digestValue,
+			GeneratedDigestValue: string(generatedDigestValue),
+			DigestValue:          string(digestValue),
 		}
 		if bytes.Compare(generatedDigestValue, digestValue) == 0 {
 			referenceValidationResult.IsValid = true
@@ -133,7 +133,7 @@ func (validator *XMLDSigValidator) Validate(xmlBytes []byte) (ValidationResult, 
 	if err != nil {
 		return ValidationResult{}, err
 	}
-	signedInfoInput, err := validator.signedInfoFactory.CreateDereferencer().Dereference(xmlBytes, "//"+signedInfoElementTag)
+	signedInfoInput, err := validator.signedInfoFactory.CreateDereferencer().DereferenceByPath(xmlBytes, "//"+signatureElementTag+"/"+signedInfoElementTag)
 	if err != nil {
 		return ValidationResult{}, fmt.Errorf("cannot derefernce SignedInfo element: %w", err)
 	}
@@ -150,14 +150,6 @@ func (validator *XMLDSigValidator) Validate(xmlBytes []byte) (ValidationResult, 
 	if err != nil {
 		return ValidationResult{}, err
 	}
-	signedInfoDigester, err := CreateDigesterForSignatureAlgorithm(signatureMethodAlgorithm)
-	if err != nil {
-		return ValidationResult{}, err
-	}
-	digestedSignedInfo, err := signedInfoDigester.Digest(canonicalizedSignedInfo)
-	if err != nil {
-		return ValidationResult{}, fmt.Errorf("error while digesting SignedInfo element: %w", err)
-	}
 	signatureValueElement, err := mustFoundOnlyOneChildElement(signatureElement, signatureValueElementTag)
 	if err != nil {
 		return ValidationResult{}, err
@@ -169,7 +161,7 @@ func (validator *XMLDSigValidator) Validate(xmlBytes []byte) (ValidationResult, 
 	}
 	isSignatureValid := false
 	for _, signatureVerifier := range possibleSignatureVerifiers {
-		err := signatureVerifier.Verify(signatureMethodAlgorithm, digestedSignedInfo, []byte(signatureValue))
+		err := signatureVerifier.Verify(signatureMethodAlgorithm, canonicalizedSignedInfo, []byte(signatureValue))
 		if err == nil {
 			isSignatureValid = true
 			break
@@ -245,7 +237,6 @@ func createPossibleSignatureVerifiersFromKeyInfoElement(keyInfoElement *etree.El
 			x509CertificateElements := x509Element.SelectElements(x509CertificateElementTag)
 			if len(x509CertificateElements) > 0 {
 				for _, x509CertificateElement := range x509CertificateElements {
-
 					asn1Certificate, err := base64.StdEncoding.DecodeString(x509CertificateElement.Text())
 					if err != nil {
 						return nil, errors.New("cannot base64-decode attached certificate: " + err.Error())
