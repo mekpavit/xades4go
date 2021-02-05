@@ -27,7 +27,7 @@ const (
 )
 
 type SignatureValidator interface {
-	Validate(xmlByte []byte) (ValidationResult, error)
+	Validate(xmlBytes []byte) (ValidationResult, error)
 }
 
 type ValidationResult struct {

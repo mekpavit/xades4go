@@ -42,14 +42,12 @@ func (validator *XMLDSigSignatureValidator) Validate(xmlBytes []byte) (Validatio
 	}
 	result := ValidationResult{}
 	for referenceIndex, reference := range references {
+		referenceDetail := ReferenceGenerationDetail{}
 		uriAttribute, err := mustFoundAttribute(reference, uriAttributeKey)
 		if err != nil {
 			return ValidationResult{}, errors.New("this validator does not support anonymous referecing (no URI attribute)")
 		}
-		xmlInput, err := validator.signedInfoFactory.CreateDereferencer().DereferenceByURI(xmlBytes, uriAttribute.Value)
-		if err != nil {
-			return ValidationResult{}, fmt.Errorf("at Reference#%d element, cannot dereference the given URI: %w", referenceIndex, err)
-		}
+		referenceDetail.URIOfDataObjectBeingSigned = uriAttribute.Value
 		transformsElement, err := mustFoundOnlyOneIfFound(reference, transformsElementTag)
 		if err != nil {
 			return ValidationResult{}, fmt.Errorf("at Reference#%d element: %w", referenceIndex, err)
@@ -64,25 +62,7 @@ func (validator *XMLDSigSignatureValidator) Validate(xmlBytes []byte) (Validatio
 				if err != nil {
 					return ValidationResult{}, fmt.Errorf("at Transform#%d element of Reference#%d element: %w", transformIndex, referenceIndex, err)
 				}
-				transformer, err := validator.signedInfoFactory.CreateTransformer(algorithmAttribute.Value)
-				if err != nil {
-					return ValidationResult{}, fmt.Errorf("error while creating Transformer at Transform#%d element of Reference#%d element: %w", transformIndex, referenceIndex, err)
-				}
-				xmlInput, err = transformer.Transform(xmlInput)
-				if err != nil {
-					return ValidationResult{}, fmt.Errorf("error while transforming at Transform#%d element of Reference#%d element: %w", transformIndex, referenceIndex, err)
-				}
-			}
-		}
-		transformedDataObjectToBeDigested := xmlInput.OctetStream
-		if !xmlInput.IsOctetStream {
-			canonicalizer, err := validator.signedInfoFactory.CreateCanonicalizer(validator.defaultCanonicalizationAlgorithm)
-			if err != nil {
-				return ValidationResult{}, fmt.Errorf("error while creating canonicalizer at Reference#%d: %w", referenceIndex, err)
-			}
-			transformedDataObjectToBeDigested, err = canonicalizer.Canonicalize(xmlInput)
-			if err != nil {
-				return ValidationResult{}, fmt.Errorf("error while canonicalizing at Reference#%d: %w", referenceIndex, err)
+				referenceDetail.TransformAlgorithms = append(referenceDetail.TransformAlgorithms, algorithmAttribute.Value)
 			}
 		}
 		digestMethodElement, err := mustFoundOnlyOneChildElement(reference, digestMethodElementTag)
@@ -93,11 +73,8 @@ func (validator *XMLDSigSignatureValidator) Validate(xmlBytes []byte) (Validatio
 		if err != nil {
 			return ValidationResult{}, fmt.Errorf("at Reference#%d element: %w", referenceIndex, err)
 		}
-		digester, err := CreateDigester(algorithmAttribute.Value)
-		if err != nil {
-			return ValidationResult{}, fmt.Errorf("error while creating Digester at Reference#%d: %w", referenceIndex, err)
-		}
-		generatedDigestValue, err := digester.Digest(transformedDataObjectToBeDigested)
+		referenceDetail.DigestAlgorithm = algorithmAttribute.Value
+		generatedDigestValue, err := digestDataObjectFrom(validator.signedInfoFactory, xmlBytes, validator.defaultCanonicalizationAlgorithm, referenceDetail)
 		if err != nil {
 			return ValidationResult{}, fmt.Errorf("error while digesting at Reference#%d: %w", referenceIndex, err)
 		}
@@ -254,4 +231,41 @@ func createPossibleSignatureVerifiersFromKeyInfoElement(keyInfoElement *etree.El
 		}
 	}
 	return result, nil
+}
+
+func digestDataObjectFrom(signedInfoFactory SignedInfoFactory, xmlBytes []byte, defaultCanonicalizationAlgorithm string, referenceDetails ReferenceGenerationDetail) ([]byte, error) {
+	xmlInput, err := signedInfoFactory.CreateDereferencer().DereferenceByURI(xmlBytes, referenceDetails.URIOfDataObjectBeingSigned)
+	if err != nil {
+		return nil, fmt.Errorf("cannot dereference the given URI: %w", err)
+	}
+	for transformIndex, transformAlgorithm := range referenceDetails.TransformAlgorithms {
+		transformer, err := signedInfoFactory.CreateTransformer(transformAlgorithm)
+		if err != nil {
+			return nil, fmt.Errorf("error while creating Transformer at Transform#%d element: %w", transformIndex, err)
+		}
+		xmlInput, err = transformer.Transform(xmlInput)
+		if err != nil {
+			return nil, fmt.Errorf("error while transforming at Transform#%d element: %w", transformIndex, err)
+		}
+	}
+	transformedDataObjectToBeDigested := xmlInput.OctetStream
+	if !xmlInput.IsOctetStream {
+		canonicalizer, err := signedInfoFactory.CreateCanonicalizer(defaultCanonicalizationAlgorithm)
+		if err != nil {
+			return nil, fmt.Errorf("error while creating canonicalizer: %w", err)
+		}
+		transformedDataObjectToBeDigested, err = canonicalizer.Canonicalize(xmlInput)
+		if err != nil {
+			return nil, fmt.Errorf("error while canonicalizing: %w", err)
+		}
+	}
+	digester, err := CreateDigester(referenceDetails.DigestAlgorithm)
+	if err != nil {
+		return nil, fmt.Errorf("error while creating Digester: %w", err)
+	}
+	generatedDigestValue, err := digester.Digest(transformedDataObjectToBeDigested)
+	if err != nil {
+		return nil, fmt.Errorf("error while digesting: %w", err)
+	}
+	return generatedDigestValue, nil
 }
